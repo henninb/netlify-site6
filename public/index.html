@@ -47,18 +47,6 @@
       return text;
     }
 
-    async function generateCodeChallenge(codeVerifier) {
-      const digest = await crypto.subtle.digest(
-        'SHA-256',
-        new TextEncoder().encode(codeVerifier),
-      );
-
-      return btoa(String.fromCharCode(...new Uint8Array(digest)))
-        .replace(/=/g, '')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_');
-    }
-
     function generateUrlWithSearchParams(url, params) {
       const urlObject = new URL(url);
       urlObject.search = new URLSearchParams(params).toString();
@@ -69,9 +57,6 @@
     function redirectToAuthorizeEndpoint() {
       const codeVerifier = generateRandomString(64);
       console.log('codeVerifier: ' + codeVerifier);
-
-      generateCodeChallenge(codeVerifier).then((code_challenge) => {
-        window.localStorage.setItem('code_verifier', codeVerifier);
 
         window.location = generateUrlWithSearchParams(
           authorize_endpoint,
@@ -84,7 +69,6 @@
             //code_challenge,
           },
         )
-      });
     }
 
     function exchangeToken(code) {
