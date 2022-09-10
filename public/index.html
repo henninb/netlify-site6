@@ -11,10 +11,13 @@
       //          'https://api.napster.com/oauth/authorize?client_id=M2Y4N2UyZGEtMjM4MS00NmM5LTlhMTEtOGFiNzc4OGU4Yzhi&redirect_uri=https://bh-website2.netlify.app/&response_type=code',
 
     const authorize_endpoint = 'https://api.napster.com/oauth/authorize';
-    const exchange_token_endpoint = 'https://accounts.spotify.com/api/token';
+    const exchange_token_endpoint = 'https://api.napster.com/oauth/access_token';
     const client_id = 'M2Y4N2UyZGEtMjM4MS00NmM5LTlhMTEtOGFiNzc4OGU4Yzhi';
-    const redirect_uri = 'https://bh-website6.netlify.app/'; // Your redirect uri
+    const client_secret = 'NjRiYTU3MzItMzM2MS00YTU5LWFhZDEtNWMzNDQ5MTg0MjRh'
+    const redirect_uri = 'https://site6.brianhenning.xyz/'; // Your redirect uri
     //const scope = 'user-read-currently-playing';
+
+
 
     function show(input) {
       if (input === 'login') {
@@ -71,9 +74,17 @@
         )
     }
 
+    async function addThrowErrorToFetch(response) {
+      if (response.ok) {
+        return response.json();
+      } else {
+        throw { response, error: await response.json() };
+      }
+    }
+
     function exchangeToken(code) {
-      console.log("Getting code_verifier, getting access token. Auth code: " + code);
-      const code_verifier = localStorage.getItem('code_verifier');
+      console.log("Auth code: " + code);
+      //const code_verifier = localStorage.getItem('code_verifier');
 
       fetch(exchange_token_endpoint, {
         method: 'POST',
@@ -82,14 +93,26 @@
         },
         body: new URLSearchParams({
           client_id,
+          client_secret,
           grant_type: 'authorization_code',
+          response_type: 'code',
           code,
           redirect_uri,
-          code_verifier,
+          //code_verifier,
         }),
       }).then(addThrowErrorToFetch)
         .then((data) => {
-          processTokenResponse(data);
+         // console.log('process token');
+         // console.log(data);
+          console.log(`Access Token Response ${JSON.stringify(data)}`);
+          console.log("Access Token: " + data.access_token)
+          access_token = data.access_token;
+
+    const t = new Date();
+    expires_at = t.setSeconds(t.getSeconds() + data.expires_in);
+
+    localStorage.setItem('access_token', access_token);
+          //processTokenResponse(data);
 
         // clear search query params in the url
         window.history.replaceState({}, document.title, '/');
