@@ -30,24 +30,9 @@
     }
 
     function logout() {
+      console.log('logout was called.');
       localStorage.clear();
       window.location.reload();
-    }
-
-    function generateRandomString(length) {
-      let text = '';
-      const possible =
-        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-
-      for (let i = 0; i < length; i++) {
-        text += possible.charAt(Math.floor(Math.random() * possible.length));
-      }
-
-      console.log('generate random');
-      const codeVerifier = document.getElementById('code-verifier');
-      codeVerifier.innerText = text;
-
-      return text;
     }
 
     function generateUrlWithSearchParams(url, params) {
@@ -57,9 +42,17 @@
       return urlObject.toString();
     }
 
+    function getSong() {
+      if( access_token ) {
+        console.log(access_token);
+      } else {
+        console.log('no access token as of now');
+      }
+    }
+
     function redirectToAuthorizeEndpoint() {
-      const codeVerifier = generateRandomString(64);
-      console.log('codeVerifier: ' + codeVerifier);
+      //const codeVerifier = generateRandomString(64);
+      //console.log('codeVerifier: ' + codeVerifier);
 
         window.location = generateUrlWithSearchParams(
           authorize_endpoint,
@@ -105,21 +98,16 @@
          // console.log('process token');
          // console.log(data);
           console.log(`Access Token Response ${JSON.stringify(data)}`);
-          console.log("Access Token: " + data.access_token)
+          console.log("access_Token: " + data.access_token)
           access_token = data.access_token;
 
-    const t = new Date();
-    expires_at = t.setSeconds(t.getSeconds() + data.expires_in);
-
-    localStorage.setItem('access_token', access_token);
-          //processTokenResponse(data);
+          localStorage.setItem('access_token', access_token);
 
         // clear search query params in the url
         window.history.replaceState({}, document.title, '/');
       })
     }
 
-    console.log('example1');
     if (code) {
       console.log('I have the code');
       exchangeToken(code);
@@ -131,19 +119,18 @@
 <body>
     <header>
         <div id="loggedin" style="display:none;">
-            <button id="logout-button">logout</button>
-            <button id="getCurrent">get-song</button>
+          test
         </div>
     </header>
 
     <div id="login" style="display:unset;">
-        <h1> log in to find your current song </h1>
-
         <button id="login-button">Login</button>
-        <script>
-          document.getElementById('login-button')
-        .addEventListener('click', () => {redirectToAuthorizeEndpoint()}, false);
+        <button id="getCurrent">get-song</button>
+        <button id="logout-button">logout</button>
 
+        <script>
+          document.getElementById('getCurrent').addEventListener('click', () => {getSong()}, false);
+          document.getElementById('login-button').addEventListener('click', () => {redirectToAuthorizeEndpoint()}, false);
           document.getElementById('logout-button').addEventListener('click', () => {logout()}, false);
 
         </script>
