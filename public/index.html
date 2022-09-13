@@ -12,6 +12,7 @@
 
     const authorize_endpoint = 'https://api.napster.com/oauth/authorize';
     const exchange_token_endpoint = 'https://api.napster.com/oauth/access_token';
+    const favorite_songs_endpoint = 'https://api.napster.com/v2.2/me/favorites?limit=100';
     const client_id = 'M2Y4N2UyZGEtMjM4MS00NmM5LTlhMTEtOGFiNzc4OGU4Yzhi';
     const client_secret = 'NjRiYTU3MzItMzM2MS00YTU5LWFhZDEtNWMzNDQ5MTg0MjRh'
     const redirect_uri = 'https://site6.brianhenning.xyz/'; // Your redirect uri
@@ -45,6 +46,31 @@
     function getSong() {
       if( access_token ) {
         console.log(access_token);
+      fetch(favorite_songs_endpoint, {
+        method: 'GET',
+        headers: {
+          'Authorization': 'Bearer ' + access_token,
+        },
+      })
+      .then((res) => res.json())
+      .then((data) => {
+         console.log(data);
+         console.log(data.favorites.data.tracks);
+          let output = '<h2 class="mb-4">Favorite Songs</h2>';
+          data.favorites.data.tracks.forEach(function(track){
+            output += `
+              <ul class="list-group mb-3">
+                <li class="list-group-item">ID: ${track.id}</li>
+                <li class="list-group-item">ArtistId: ${track.artistId}</li>
+                <li class="list-group-item">Artist: ${track.artistName}</li>
+                <li class="list-group-item">Track: ${track.name}</li>
+              </ul>
+            `;
+          });
+          document.getElementById('output').innerHTML = output;
+      })
+
+
       } else {
         console.log('no access token as of now');
       }
@@ -135,6 +161,10 @@
 
         </script>
         <br><br>
+
+        <hr>
+      <div id="output"></div>
+        <hr>
 
         <div id="intro">
             This is a demonstration of using OAuth to authenticate with Napster.<br>
