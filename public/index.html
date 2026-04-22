@@ -85,8 +85,13 @@
       return new Date(ts * 1000).toISOString().replace('T',' ').slice(0,19) + ' UTC';
     }
 
+    function escHTML(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
     function syntaxColor(json) {
-      return json.replace(/("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(?:\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g, m => {
+      const safe = json.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return safe.replace(/("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(?:\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g, m => {
         if (/^"/.test(m)) return /:$/.test(m) ? `<span class="jk">${m}</span>` : `<span class="js">${m}</span>`;
         if (/true|false/.test(m)) return `<span class="jb">${m}</span>`;
         if (/null/.test(m)) return `<span class="jn">${m}</span>`;
@@ -169,8 +174,8 @@
           ${checks.map(c => `
             <div class="claim-row ${c.ok ? 'claim-ok' : 'claim-warn'}">
               <span class="claim-icon">${c.ok ? '✓' : '!'}</span>
-              <span class="claim-key">${c.label}</span>
-              <span class="claim-val">${c.val}</span>
+              <span class="claim-key">${escHTML(c.label)}</span>
+              <span class="claim-val">${escHTML(c.val)}</span>
             </div>`).join('')}
         </div>
         <div class="verify-section">
@@ -196,6 +201,8 @@
     }
 
     /* ─── BUILD ──────────────────────────────────────────────────── */
+    let _builtToken = '';
+
     async function runBuild() {
       const iss     = document.getElementById('b-iss').value.trim()    || 'https://auth.example.com';
       const sub     = document.getElementById('b-sub').value.trim()    || 'user_abc123';
@@ -213,9 +220,8 @@
         if (k && v) { try { payload[k] = JSON.parse(v); } catch { payload[k] = v; } }
       });
 
-      const token = await signHS256(header, payload, secret);
-      const parts = token.split('.');
-      const escaped = token.replace(/\\/g,'\\\\').replace(/`/g,'\\`');
+      _builtToken = await signHS256(header, payload, secret);
+      const parts = _builtToken.split('.');
 
       document.getElementById('build-out').innerHTML = `
         <div class="build-result">
@@ -223,7 +229,7 @@
           <div class="token-viz">
             <span class="part-h">${parts[0]}</span><span class="dot">.</span><span class="part-p">${parts[1]}</span><span class="dot">.</span><span class="part-s">${parts[2]}</span>
           </div>
-          <button class="btn btn-ghost btn-sm copy-btn" id="copy-btn" onclick="doCopy(\`${escaped}\`)">⎘ Copy token</button>
+          <button class="btn btn-ghost btn-sm copy-btn" id="copy-btn" onclick="doCopy()">⎘ Copy token</button>
           <div class="decode-cols" style="margin-top:20px">
             <div class="decode-col">
               <div class="col-label c-h">Header</div>
@@ -239,8 +245,8 @@
       `;
     }
 
-    async function doCopy(text) {
-      await navigator.clipboard.writeText(text);
+    async function doCopy() {
+      await navigator.clipboard.writeText(_builtToken);
       const btn = document.getElementById('copy-btn');
       if (btn) { btn.textContent = '✓ Copied!'; setTimeout(() => btn.textContent = '⎘ Copy token', 1800); }
     }
