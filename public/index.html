@@ -2,23 +2,20 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PKCE example</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PKCE × Napster</title>
     <script>
 
     const args = new URLSearchParams(window.location.search);
     const code = args.get('code');
     let access_token = localStorage.getItem('access_token') || null;
-      //          'https://api.napster.com/oauth/authorize?client_id=M2Y4N2UyZGEtMjM4MS00NmM5LTlhMTEtOGFiNzc4OGU4Yzhi&redirect_uri=https://bh-website2.netlify.app/&response_type=code',
 
     const authorize_endpoint = 'https://api.napster.com/oauth/authorize';
     const exchange_token_endpoint = 'https://api.napster.com/oauth/access_token';
     const favorite_songs_endpoint = 'https://api.napster.com/v2.2/me/favorites?limit=100';
     const client_id = 'M2Y4N2UyZGEtMjM4MS00NmM5LTlhMTEtOGFiNzc4OGU4Yzhi';
     const client_secret = 'NjRiYTU3MzItMzM2MS00YTU5LWFhZDEtNWMzNDQ5MTg0MjRh'
-    const redirect_uri = 'https://site6.brianhenning.xyz/'; // Your redirect uri
-    //const scope = 'user-read-currently-playing';
-
-
+    const redirect_uri = 'https://site6.brianhenning.xyz/';
 
     function show(input) {
       if (input === 'login') {
@@ -39,58 +36,51 @@
     function generateUrlWithSearchParams(url, params) {
       const urlObject = new URL(url);
       urlObject.search = new URLSearchParams(params).toString();
-
       return urlObject.toString();
     }
 
     function getSong() {
       if( access_token ) {
         console.log(access_token);
-      fetch(favorite_songs_endpoint, {
-        method: 'GET',
-        headers: {
-          'Authorization': 'Bearer ' + access_token,
-        },
-      })
-      .then((res) => res.json())
-      .then((data) => {
-         console.log(data);
-         console.log(data.favorites.data.tracks);
-          let output = '<h2 class="mb-4">Favorite Songs</h2>';
-          data.favorites.data.tracks.forEach(function(track){
-            output += `
-              <ul class="list-group mb-3">
-                <li class="list-group-item">ID: ${track.id}</li>
-                <li class="list-group-item">ArtistId: ${track.artistId}</li>
-                <li class="list-group-item">Artist: ${track.artistName}</li>
-                <li class="list-group-item">Track: ${track.name}</li>
-              </ul>
-            `;
-          });
-          document.getElementById('output').innerHTML = output;
-      })
-
-
+        document.getElementById('output').innerHTML = '<p class="loading-msg">Fetching your tracks…</p>';
+        fetch(favorite_songs_endpoint, {
+          method: 'GET',
+          headers: {
+            'Authorization': 'Bearer ' + access_token,
+          },
+        })
+        .then((res) => res.json())
+        .then((data) => {
+           console.log(data);
+           console.log(data.favorites.data.tracks);
+            let output = '<h2 class="tracks-heading">Favorite Songs</h2>';
+            data.favorites.data.tracks.forEach(function(track, i){
+              output += `
+                <ul class="list-group mb-3" style="animation-delay:${i * 0.05}s">
+                  <li class="list-group-item"><span class="item-label">ID</span>${track.id}</li>
+                  <li class="list-group-item"><span class="item-label">Artist ID</span>${track.artistId}</li>
+                  <li class="list-group-item"><span class="item-label">Artist</span>${track.artistName}</li>
+                  <li class="list-group-item track-name"><span class="item-label">Track</span>${track.name}</li>
+                </ul>
+              `;
+            });
+            document.getElementById('output').innerHTML = output;
+        })
       } else {
         console.log('no access token as of now');
+        document.getElementById('output').innerHTML = '<p class="no-token-msg">No access token — please login first.</p>';
       }
     }
 
     function redirectToAuthorizeEndpoint() {
-      //const codeVerifier = generateRandomString(64);
-      //console.log('codeVerifier: ' + codeVerifier);
-
-        window.location = generateUrlWithSearchParams(
-          authorize_endpoint,
-          {
-            response_type: 'code',
-            client_id: client_id,
-            redirect_uri: redirect_uri,
-            //scope: scope,
-            //code_challenge_method: 'S256',
-            //code_challenge,
-          },
-        )
+      window.location = generateUrlWithSearchParams(
+        authorize_endpoint,
+        {
+          response_type: 'code',
+          client_id: client_id,
+          redirect_uri: redirect_uri,
+        },
+      )
     }
 
     async function addThrowErrorToFetch(response) {
@@ -103,8 +93,6 @@
 
     function exchangeToken(code) {
       console.log("Auth code: " + code);
-      //const code_verifier = localStorage.getItem('code_verifier');
-
       fetch(exchange_token_endpoint, {
         method: 'POST',
         headers: {
@@ -117,21 +105,15 @@
           response_type: 'code',
           code,
           redirect_uri,
-          //code_verifier,
         }),
       }).then(addThrowErrorToFetch)
         .then((data) => {
-         // console.log('process token');
-         // console.log(data);
           console.log(`Access Token Response ${JSON.stringify(data)}`);
           console.log("access_Token: " + data.access_token)
           access_token = data.access_token;
-
           localStorage.setItem('access_token', access_token);
-
-        // clear search query params in the url
-        window.history.replaceState({}, document.title, '/');
-      })
+          window.history.replaceState({}, document.title, '/');
+        })
     }
 
     if (code) {
@@ -141,71 +123,668 @@
       console.log('I do not have the code yet');
     }
   </script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=JetBrains+Mono:wght@300;400;500&display=swap');
+
+    /* ─── TOKENS ─────────────────────────────────────────────── */
+    :root {
+      --bg:         #020205;
+      --surface:    #080810;
+      --card:       rgba(255,255,255,0.028);
+      --border:     rgba(255,255,255,0.07);
+      --border-hi:  rgba(255,255,255,0.13);
+      --cyan:       #00e5cc;
+      --pink:       #ff1a75;
+      --gold:       #f5c518;
+      --white:      #f0eff6;
+      --dim:        #7a7a92;
+      --muted:      #404055;
+      --glow-c:     rgba(0,229,204,0.35);
+      --glow-p:     rgba(255,26,117,0.35);
+    }
+
+    /* ─── RESET ──────────────────────────────────────────────── */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html { scroll-behavior: smooth; font-size: 16px; }
+
+    /* ─── BASE ───────────────────────────────────────────────── */
+    body {
+      background: var(--bg);
+      color: var(--white);
+      font-family: 'Crimson Pro', Georgia, serif;
+      font-size: 1.05rem;
+      line-height: 1.7;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ─── GRAIN ──────────────────────────────────────────────── */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.055'/%3E%3C/svg%3E");
+      opacity: 0.55;
+      pointer-events: none;
+      z-index: 9000;
+    }
+
+    /* ─── AMBIENT BLOBS ──────────────────────────────────────── */
+    .amb {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(130px);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .amb-1 {
+      width: 560px; height: 560px;
+      background: radial-gradient(circle, rgba(0,229,204,0.1), transparent 70%);
+      top: -260px; left: -160px;
+      animation: drift-a 22s ease-in-out infinite;
+    }
+    .amb-2 {
+      width: 460px; height: 460px;
+      background: radial-gradient(circle, rgba(255,26,117,0.08), transparent 70%);
+      bottom: -200px; right: -140px;
+      animation: drift-b 28s ease-in-out infinite;
+    }
+    .amb-3 {
+      width: 280px; height: 280px;
+      background: radial-gradient(circle, rgba(245,197,24,0.05), transparent 70%);
+      top: 45%; left: 55%;
+      animation: pulse-a 10s ease-in-out infinite;
+    }
+
+    @keyframes drift-a {
+      0%,100% { transform: translate(0,0); }
+      33%      { transform: translate(70px,50px); }
+      66%      { transform: translate(-40px,70px); }
+    }
+    @keyframes drift-b {
+      0%,100% { transform: translate(0,0); }
+      33%      { transform: translate(-60px,-40px); }
+      66%      { transform: translate(40px,-55px); }
+    }
+    @keyframes pulse-a {
+      0%,100% { opacity: 0.35; transform: scale(1); }
+      50%      { opacity: 0.8;  transform: scale(1.35); }
+    }
+
+    /* ─── LAYOUT ─────────────────────────────────────────────── */
+    .page {
+      position: relative;
+      z-index: 1;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 0 28px 80px;
+    }
+
+    /* ─── TOPBAR ─────────────────────────────────────────────── */
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 28px 0 0;
+    }
+    .topbar-logo {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.65rem;
+      letter-spacing: 0.3em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+    .topbar-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 10px var(--glow-c);
+      animation: blink 2.4s ease-in-out infinite;
+    }
+    @keyframes blink {
+      0%,100% { opacity: 1; }
+      50%      { opacity: 0.15; }
+    }
+
+    /* ─── LOGGEDIN BANNER ────────────────────────────────────── */
+    header { padding: 0; }
+    #loggedin {
+      display: none;
+      margin-top: 20px;
+      padding: 14px 20px;
+      background: rgba(0,229,204,0.06);
+      border: 1px solid rgba(0,229,204,0.2);
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      letter-spacing: 0.18em;
+      color: var(--cyan);
+      text-transform: uppercase;
+    }
+
+    /* ─── HERO ───────────────────────────────────────────────── */
+    .hero {
+      position: relative;
+      padding: 68px 0 44px;
+    }
+    .hero-eye {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.65rem;
+      letter-spacing: 0.38em;
+      color: var(--cyan);
+      text-transform: uppercase;
+      margin-bottom: 18px;
+      opacity: 0;
+      animation: up 0.7s ease forwards 0.15s;
+    }
+    .hero-title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: clamp(76px, 13vw, 148px);
+      line-height: 0.88;
+      letter-spacing: 0.025em;
+      margin-bottom: 26px;
+      opacity: 0;
+      animation: up 0.7s ease forwards 0.3s;
+    }
+    .hero-title .t1 { display: block; color: var(--white); }
+    .hero-title .t2 {
+      display: block;
+      background: linear-gradient(100deg, var(--cyan) 0%, var(--pink) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero-sub {
+      font-size: 1.1rem;
+      color: var(--dim);
+      font-style: italic;
+      max-width: 400px;
+      opacity: 0;
+      animation: up 0.7s ease forwards 0.45s;
+    }
+
+    /* Vinyl record */
+    .vinyl {
+      position: absolute;
+      right: -10px;
+      top: 50px;
+      width: 168px;
+      height: 168px;
+      opacity: 0;
+      animation: fadein 1s ease forwards 0.9s, spin 9s linear infinite 1.9s;
+    }
+    .vinyl-disc {
+      width: 100%; height: 100%;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 50% 50%,
+          #1c1c1c 0%, #1c1c1c 13%,
+          transparent 13.5%, transparent 17%,
+          #111 17%, #111 17.5%,
+          transparent 18%, transparent 31%,
+          #0f0f0f 31%, #0f0f0f 31.5%,
+          transparent 32%, transparent 46%,
+          #111 46%, #111 46.5%,
+          transparent 47%, transparent 62%,
+          #0f0f0f 62%, #0f0f0f 62.5%,
+          transparent 63%, transparent 78%,
+          #111 78%, #111 78.5%,
+          transparent 79%, #000 100%
+        ),
+        conic-gradient(from 0deg,
+          #151515, #0b0b0b 9deg, #151515 18deg, #0b0b0b 27deg,
+          #151515 36deg, #0b0b0b 45deg, #151515 54deg, #0b0b0b 63deg,
+          #151515 72deg, #0b0b0b 81deg, #151515 90deg, #0b0b0b 99deg,
+          #151515 108deg, #0b0b0b 117deg, #151515 126deg, #0b0b0b 135deg,
+          #151515 144deg, #0b0b0b 153deg, #151515 162deg, #0b0b0b 171deg,
+          #151515 180deg, #0b0b0b 189deg, #151515 198deg, #0b0b0b 207deg,
+          #151515 216deg, #0b0b0b 225deg, #151515 234deg, #0b0b0b 243deg,
+          #151515 252deg, #0b0b0b 261deg, #151515 270deg, #0b0b0b 279deg,
+          #151515 288deg, #0b0b0b 297deg, #151515 306deg, #0b0b0b 315deg,
+          #151515 324deg, #0b0b0b 333deg, #151515 342deg, #0b0b0b 351deg, #151515
+        );
+      border: 1px solid rgba(255,255,255,0.04);
+      box-shadow: 0 0 50px rgba(0,0,0,0.9), 0 0 20px rgba(0,0,0,0.6);
+      position: relative;
+    }
+    .vinyl-disc::after {
+      content: '';
+      position: absolute;
+      width: 28%; height: 28%;
+      border-radius: 50%;
+      background: conic-gradient(var(--cyan), var(--pink), var(--cyan));
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      box-shadow: 0 0 18px var(--glow-c), 0 0 6px var(--glow-p);
+    }
+    .vinyl-disc::before {
+      content: '';
+      position: absolute;
+      width: 9%; height: 9%;
+      border-radius: 50%;
+      background: #000;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 1;
+    }
+
+    @keyframes spin    { to { transform: rotate(360deg); } }
+    @keyframes fadein  { to { opacity: 0.82; } }
+    @keyframes up {
+      from { opacity: 0; transform: translateY(22px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ─── DIVIDER ────────────────────────────────────────────── */
+    .divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--border) 25%, var(--border) 75%, transparent);
+      margin: 0 0 44px;
+    }
+
+    /* ─── ACTION ROW ─────────────────────────────────────────── */
+    .actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 52px;
+      opacity: 0;
+      animation: up 0.7s ease forwards 0.6s;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      padding: 13px 30px;
+      border: none;
+      border-radius: 3px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.18s ease, box-shadow 0.25s ease;
+    }
+    .btn::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: rgba(255,255,255,0.07);
+      opacity: 0;
+      transition: opacity 0.18s;
+    }
+    .btn:hover::after { opacity: 1; }
+    .btn:active { transform: scale(0.97); }
+
+    .btn-primary {
+      background: var(--cyan);
+      color: #000;
+      font-weight: 500;
+    }
+    .btn-primary:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 0 28px var(--glow-c), 0 0 60px rgba(0,229,204,0.15);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--white);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover {
+      border-color: var(--pink);
+      transform: translateY(-3px);
+      box-shadow: 0 0 22px var(--glow-p);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--dim);
+      border: 1px solid var(--muted);
+      font-size: 0.68rem;
+    }
+    .btn-ghost:hover {
+      color: var(--white);
+      border-color: var(--border-hi);
+      transform: translateY(-2px);
+    }
+
+    /* ─── OUTPUT ─────────────────────────────────────────────── */
+    #output { margin-bottom: 52px; }
+
+    .loading-msg, .no-token-msg {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.78rem;
+      color: var(--dim);
+      letter-spacing: 0.12em;
+      padding: 20px 0;
+    }
+    .no-token-msg { color: var(--pink); }
+
+    #output .tracks-heading {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 2.2rem;
+      letter-spacing: 0.08em;
+      margin-bottom: 20px;
+      background: linear-gradient(90deg, var(--cyan), var(--white) 55%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    #output .list-group {
+      list-style: none;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      margin-bottom: 10px;
+      overflow: hidden;
+      opacity: 0;
+      animation: up 0.4s ease forwards;
+      transition: border-color 0.2s;
+    }
+    #output .list-group:hover { border-color: rgba(0,229,204,0.22); }
+
+    #output .list-group-item {
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+      padding: 9px 20px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.76rem;
+      color: var(--dim);
+      border-bottom: 1px solid var(--border);
+    }
+    #output .list-group-item:last-child { border-bottom: none; }
+
+    #output .item-label {
+      font-size: 0.62rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      min-width: 70px;
+      flex-shrink: 0;
+    }
+    #output .track-name {
+      color: var(--white);
+      font-size: 0.82rem;
+    }
+
+    /* ─── INFO CARD ──────────────────────────────────────────── */
+    .info-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 30px 32px;
+      margin-bottom: 52px;
+      position: relative;
+      overflow: hidden;
+      opacity: 0;
+      animation: up 0.7s ease forwards 0.75s;
+    }
+    .info-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0;
+      width: 3px; height: 100%;
+      background: linear-gradient(180deg, var(--cyan), var(--pink));
+    }
+
+    #intro {
+      font-size: 1.05rem;
+      color: var(--dim);
+      line-height: 1.85;
+    }
+    #intro b {
+      color: var(--cyan);
+      font-weight: 400;
+      font-style: normal;
+    }
+
+    /* ─── STEPS ──────────────────────────────────────────────── */
+    .steps-header {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.62rem;
+      letter-spacing: 0.38em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 18px;
+      opacity: 0;
+      animation: up 0.7s ease forwards 0.85s;
+    }
+
+    .step-wrap {
+      opacity: 0;
+      animation: up 0.6s ease forwards;
+    }
+    .step-wrap:nth-child(1) { animation-delay: 0.9s; }
+    .step-wrap:nth-child(2) { animation-delay: 1.0s; }
+    .step-wrap:nth-child(3) { animation-delay: 1.1s; }
+
+    .step-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 26px 28px 26px 72px;
+      margin-bottom: 10px;
+      position: relative;
+      transition: border-color 0.25s, background 0.25s;
+    }
+    .step-card:hover {
+      background: rgba(255,255,255,0.034);
+      border-color: var(--border-hi);
+    }
+
+    .step-num {
+      position: absolute;
+      left: 22px; top: 22px;
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 2.6rem;
+      line-height: 1;
+      background: linear-gradient(160deg, var(--cyan), var(--pink));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      opacity: 0.55;
+    }
+
+    #step1, #step2, #step3 {
+      font-size: 1rem;
+      color: var(--dim);
+      line-height: 1.9;
+    }
+    #step1 b, #step2 b, #step3 b {
+      color: var(--white);
+      font-weight: 600;
+    }
+
+    pre#code-verifier {
+      margin-top: 14px;
+      padding: 12px 16px;
+      background: rgba(0,0,0,0.45);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      color: var(--cyan);
+      overflow-x: auto;
+      letter-spacing: 0.04em;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    /* ─── FOOTER ─────────────────────────────────────────────── */
+    .site-footer {
+      margin-top: 72px;
+      padding: 32px 0 0;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .footer-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.62rem;
+      color: var(--muted);
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+    }
+
+    .waveform {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      height: 22px;
+    }
+    .w-bar {
+      width: 3px;
+      background: var(--cyan);
+      border-radius: 2px;
+      opacity: 0.55;
+      animation: wave 1.4s ease-in-out infinite;
+    }
+    .w-bar:nth-child(1) { height:  6px; animation-delay: 0.00s; }
+    .w-bar:nth-child(2) { height: 14px; animation-delay: 0.10s; }
+    .w-bar:nth-child(3) { height: 22px; animation-delay: 0.20s; }
+    .w-bar:nth-child(4) { height: 10px; animation-delay: 0.30s; }
+    .w-bar:nth-child(5) { height: 18px; animation-delay: 0.40s; }
+    .w-bar:nth-child(6) { height:  8px; animation-delay: 0.50s; }
+    .w-bar:nth-child(7) { height: 14px; animation-delay: 0.13s; }
+    .w-bar:nth-child(8) { height:  6px; animation-delay: 0.23s; }
+    @keyframes wave {
+      0%,100% { transform: scaleY(0.45); }
+      50%      { transform: scaleY(1); }
+    }
+
+    /* ─── SCROLLBAR ──────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: var(--surface); }
+    ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--dim); }
+
+    /* ─── SELECTION ──────────────────────────────────────────── */
+    ::selection { background: rgba(0,229,204,0.25); color: var(--white); }
+  </style>
 </head>
 <body>
+
+  <!-- Ambient background -->
+  <div class="amb amb-1"></div>
+  <div class="amb amb-2"></div>
+  <div class="amb amb-3"></div>
+
+  <div class="page">
+
+    <!-- Top bar -->
+    <div class="topbar">
+      <span class="topbar-logo">Napster · OAuth</span>
+      <div class="topbar-dot"></div>
+    </div>
+
+    <!-- Header / logged-in state -->
     <header>
-        <div id="loggedin" style="display:none;">
-          test
-        </div>
+      <div id="loggedin" style="display:none;">● Connected</div>
     </header>
 
+    <!-- Hero -->
+    <section class="hero">
+      <div class="vinyl"><div class="vinyl-disc"></div></div>
+      <p class="hero-eye">OAuth 2.0 · PKCE · Napster API</p>
+      <h1 class="hero-title">
+        <span class="t1">Connect</span>
+        <span class="t2">Napster</span>
+      </h1>
+      <p class="hero-sub">Authenticate with your Napster account to stream your favorites.</p>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- Login panel -->
     <div id="login" style="display:unset;">
-        <button id="login-button">Login</button>
-        <button id="getCurrent">get-song</button>
-        <button id="logout-button">logout</button>
 
-        <script>
-          document.getElementById('getCurrent').addEventListener('click', () => {getSong()}, false);
-          document.getElementById('login-button').addEventListener('click', () => {redirectToAuthorizeEndpoint()}, false);
-          document.getElementById('logout-button').addEventListener('click', () => {logout()}, false);
+      <!-- Buttons -->
+      <div class="actions">
+        <button id="login-button" class="btn btn-primary">↗ Login</button>
+        <button id="getCurrent" class="btn btn-secondary">♫ Get Songs</button>
+        <button id="logout-button" class="btn btn-ghost">← Logout</button>
+      </div>
 
-        </script>
-        <br><br>
+      <script>
+        document.getElementById('getCurrent').addEventListener('click', () => {getSong()}, false);
+        document.getElementById('login-button').addEventListener('click', () => {redirectToAuthorizeEndpoint()}, false);
+        document.getElementById('logout-button').addEventListener('click', () => {logout()}, false);
+      </script>
 
-        <hr>
+      <!-- Track output -->
       <div id="output"></div>
-        <hr>
 
+      <!-- Intro card -->
+      <div class="info-card">
         <div id="intro">
-            This is a demonstration of using OAuth to authenticate with Napster.<br>
-            This login flow uses <b>PKCE (Proof Key for Code Exchange)</b>, <br>
-            so the website doesn't have to expose the client secret in the source code.
+          This is a demonstration of using OAuth to authenticate with Napster.<br>
+          This login flow uses <b>PKCE (Proof Key for Code Exchange)</b>,<br>
+          so the website doesn't have to expose the client secret in the source code.
         </div>
+      </div>
 
-        <div id="step1">
-            <b>1.</b> First, the website generates a random alphanumeric string of <br>
-            length 64, the Code Verifier.
+      <!-- Steps -->
+      <p class="steps-header">How it works</p>
 
+      <div class="step-wrap">
+        <div class="step-card">
+          <span class="step-num">1</span>
+          <div id="step1">
+            First, the website generates a random alphanumeric string of
+            length&nbsp;64 — the <b>Code Verifier</b>.
             <pre id="code-verifier"></pre>
-            <!-- <div id="Loading">You will now be redirected to the Spotify login <br>
-                page within 2 seconds...
-            </div> -->
+          </div>
         </div>
+      </div>
 
-        <div id="step2">
-            <b>2.</b> You will then be redirected to the login page, <br>
-            where you will be asked to log in and confirm that you are okay with <br>
-            the permissions that the website is requesting. The URL that takes <br>
-            you to the login page will contain a HASH of the Code Verifier! <br>
-            This is the Code Challenge.
-            <br><br>
+      <div class="step-wrap">
+        <div class="step-card">
+          <span class="step-num">2</span>
+          <div id="step2">
+            You will then be redirected to the login page, where you confirm
+            the requested permissions. The URL contains a <b>hash of the Code Verifier</b>
+            — the <b>Code Challenge</b>.<br><br>
             Only this website knows the actual Code Verifier. This will be useful later on.
+          </div>
         </div>
+      </div>
 
-        <div id="step3">
-            <b>3.</b> If you give the needed permission, you will be redirected <br>
-            back here again, with an auth code. <br>
-            The website can exchange this auth code for an access token! <br>
-            This access token will allow the website to access your data through <br>
-            an API. We provide the unhashed Code Verifier to the API <br>
-            in this step, so that the API can verify that we are the same website <br>
-            that got you to login in with your account.
+      <div class="step-wrap">
+        <div class="step-card">
+          <span class="step-num">3</span>
+          <div id="step3">
+            After granting permission, you are redirected back here with an
+            <b>auth code</b>. The website exchanges this for an <b>access token</b>
+            that allows it to read your Napster data — and proves its identity to the API
+            by supplying the unhashed Code Verifier.
+          </div>
         </div>
-    </div>
+      </div>
 
-    <div id="content">
-    </div>
+      <!-- Footer -->
+      <footer class="site-footer">
+        <span class="footer-label">PKCE Demo · site6.brianhenning.xyz</span>
+        <div class="waveform">
+          <div class="w-bar"></div><div class="w-bar"></div><div class="w-bar"></div>
+          <div class="w-bar"></div><div class="w-bar"></div><div class="w-bar"></div>
+          <div class="w-bar"></div><div class="w-bar"></div>
+        </div>
+      </footer>
 
-    <!-- <script src="script.js"></script> -->
+    </div><!-- /#login -->
+
+    <div id="content"></div>
+
+  </div><!-- /.page -->
+
 </body>
 </html>
