@@ -3,152 +3,293 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PKCE × Napster</title>
+    <title>JWT Best Practices</title>
+
     <script>
-
-    const args = new URLSearchParams(window.location.search);
-    const code = args.get('code');
-    let access_token = localStorage.getItem('access_token') || null;
-
-    const authorize_endpoint = 'https://api.napster.com/oauth/authorize';
-    const exchange_token_endpoint = 'https://api.napster.com/oauth/access_token';
-    const favorite_songs_endpoint = 'https://api.napster.com/v2.2/me/favorites?limit=100';
-    const client_id = 'M2Y4N2UyZGEtMjM4MS00NmM5LTlhMTEtOGFiNzc4OGU4Yzhi';
-    const client_secret = 'NjRiYTU3MzItMzM2MS00YTU5LWFhZDEtNWMzNDQ5MTg0MjRh'
-    const redirect_uri = 'https://site6.brianhenning.xyz/';
-
-    function show(input) {
-      if (input === 'login') {
-        document.getElementById('login').style.display = 'unset';
-        document.getElementById('loggedin').style.display = 'none';
-      } else if (input === 'loggedin'){
-        document.getElementById('login').style.display = 'none';
-        document.getElementById('loggedin').style.display = 'unset';
+    /* ─── BASE64URL ──────────────────────────────────────────────── */
+    const b64url = {
+      encode(str) {
+        return btoa(unescape(encodeURIComponent(str)))
+          .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+      },
+      encodeBytes(buf) {
+        let s = '';
+        new Uint8Array(buf).forEach(b => s += String.fromCharCode(b));
+        return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+      },
+      decode(str) {
+        try {
+          str = str.replace(/-/g,'+').replace(/_/g,'/');
+          while (str.length % 4) str += '=';
+          return decodeURIComponent(escape(atob(str)));
+        } catch(e) { return null; }
+      },
+      decodeBytes(str) {
+        try {
+          str = str.replace(/-/g,'+').replace(/_/g,'/');
+          while (str.length % 4) str += '=';
+          return Uint8Array.from(atob(str), c => c.charCodeAt(0));
+        } catch(e) { return null; }
       }
+    };
+
+    /* ─── JWT CORE ───────────────────────────────────────────────── */
+    function parseJWT(token) {
+      const parts = (token || '').trim().split('.');
+      if (parts.length !== 3) return null;
+      try {
+        return {
+          header:  JSON.parse(b64url.decode(parts[0])),
+          payload: JSON.parse(b64url.decode(parts[1])),
+          sig:     parts[2],
+          raw:     parts
+        };
+      } catch(e) { return null; }
     }
 
-    function logout() {
-      console.log('logout was called.');
-      localStorage.clear();
-      window.location.reload();
+    async function signHS256(header, payload, secret) {
+      const enc = new TextEncoder();
+      const h   = b64url.encode(JSON.stringify(header));
+      const p   = b64url.encode(JSON.stringify(payload));
+      const msg = `${h}.${p}`;
+      const key = await crypto.subtle.importKey('raw', enc.encode(secret),
+        { name:'HMAC', hash:'SHA-256' }, false, ['sign']);
+      const sigBuf = await crypto.subtle.sign('HMAC', key, enc.encode(msg));
+      return `${msg}.${b64url.encodeBytes(sigBuf)}`;
     }
 
-    function generateUrlWithSearchParams(url, params) {
-      const urlObject = new URL(url);
-      urlObject.search = new URLSearchParams(params).toString();
-      return urlObject.toString();
+    async function verifyHS256(token, secret) {
+      const parts = token.trim().split('.');
+      if (parts.length !== 3) return false;
+      try {
+        const enc = new TextEncoder();
+        const key = await crypto.subtle.importKey('raw', enc.encode(secret),
+          { name:'HMAC', hash:'SHA-256' }, false, ['verify']);
+        const sigBytes = b64url.decodeBytes(parts[2]);
+        if (!sigBytes) return false;
+        return await crypto.subtle.verify('HMAC', key, sigBytes,
+          enc.encode(`${parts[0]}.${parts[1]}`));
+      } catch(e) { return false; }
     }
 
-    function getSong() {
-      if( access_token ) {
-        console.log(access_token);
-        document.getElementById('output').innerHTML = '<p class="loading-msg">Fetching your tracks…</p>';
-        fetch(favorite_songs_endpoint, {
-          method: 'GET',
-          headers: {
-            'Authorization': 'Bearer ' + access_token,
-          },
-        })
-        .then((res) => res.json())
-        .then((data) => {
-           console.log(data);
-           console.log(data.favorites.data.tracks);
-            let output = '<h2 class="tracks-heading">Favorite Songs</h2>';
-            data.favorites.data.tracks.forEach(function(track, i){
-              output += `
-                <ul class="list-group mb-3" style="animation-delay:${i * 0.05}s">
-                  <li class="list-group-item"><span class="item-label">ID</span>${track.id}</li>
-                  <li class="list-group-item"><span class="item-label">Artist ID</span>${track.artistId}</li>
-                  <li class="list-group-item"><span class="item-label">Artist</span>${track.artistName}</li>
-                  <li class="list-group-item track-name"><span class="item-label">Track</span>${track.name}</li>
-                </ul>
-              `;
-            });
-            document.getElementById('output').innerHTML = output;
-        })
-      } else {
-        console.log('no access token as of now');
-        document.getElementById('output').innerHTML = '<p class="no-token-msg">No access token — please login first.</p>';
-      }
+    /* ─── HELPERS ────────────────────────────────────────────────── */
+    const nowSec = () => Math.floor(Date.now() / 1000);
+
+    function genUUID() {
+      return '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c =>
+        (+c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> +c / 4).toString(16));
     }
 
-    function redirectToAuthorizeEndpoint() {
-      window.location = generateUrlWithSearchParams(
-        authorize_endpoint,
+    function fmtTime(ts) {
+      if (!ts) return '—';
+      return new Date(ts * 1000).toISOString().replace('T',' ').slice(0,19) + ' UTC';
+    }
+
+    function syntaxColor(json) {
+      return json.replace(/("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(?:\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g, m => {
+        if (/^"/.test(m)) return /:$/.test(m) ? `<span class="jk">${m}</span>` : `<span class="js">${m}</span>`;
+        if (/true|false/.test(m)) return `<span class="jb">${m}</span>`;
+        if (/null/.test(m)) return `<span class="jn">${m}</span>`;
+        return `<span class="ji">${m}</span>`;
+      });
+    }
+
+    /* ─── DEMO TOKEN ─────────────────────────────────────────────── */
+    const DEMO_SECRET = 'super-secret-demo-key-32-chars!!';
+
+    async function initDemoToken() {
+      const token = await signHS256(
+        { alg:'HS256', typ:'JWT' },
         {
-          response_type: 'code',
-          client_id: client_id,
-          redirect_uri: redirect_uri,
+          iss: 'https://auth.example.com',
+          sub: 'user_a1b2c3d4',
+          aud: 'https://api.example.com',
+          iat: nowSec(),
+          exp: nowSec() + 900,
+          jti: genUUID(),
+          role: 'member'
         },
-      )
-    }
-
-    async function addThrowErrorToFetch(response) {
-      if (response.ok) {
-        return response.json();
-      } else {
-        throw { response, error: await response.json() };
+        DEMO_SECRET
+      );
+      const inp = document.getElementById('decode-input');
+      if (inp && !inp.value.trim()) {
+        inp.value = token;
+        runDecode();
       }
     }
 
-    function exchangeToken(code) {
-      console.log("Auth code: " + code);
-      fetch(exchange_token_endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-        },
-        body: new URLSearchParams({
-          client_id,
-          client_secret,
-          grant_type: 'authorization_code',
-          response_type: 'code',
-          code,
-          redirect_uri,
-        }),
-      }).then(addThrowErrorToFetch)
-        .then((data) => {
-          console.log(`Access Token Response ${JSON.stringify(data)}`);
-          console.log("access_Token: " + data.access_token)
-          access_token = data.access_token;
-          localStorage.setItem('access_token', access_token);
-          window.history.replaceState({}, document.title, '/');
-        })
+    /* ─── DECODE ─────────────────────────────────────────────────── */
+    function runDecode() {
+      const raw = document.getElementById('decode-input').value.trim();
+      const jwt = parseJWT(raw);
+      const out = document.getElementById('decode-out');
+
+      if (!jwt) {
+        out.innerHTML = `<p class="err-msg">Invalid JWT — expected 3 dot-separated base64url segments.</p>`;
+        return;
+      }
+
+      const t         = nowSec();
+      const exp       = jwt.payload.exp;
+      const iat       = jwt.payload.iat;
+      const isExpired = exp && exp < t;
+
+      const checks = [
+        { label:'alg',  ok: jwt.header.alg && jwt.header.alg !== 'none',
+          val: jwt.header.alg === 'none' ? '"none" — CRITICAL VULNERABILITY' : (jwt.header.alg || 'missing') },
+        { label:'iss',  ok: !!jwt.payload.iss,  val: jwt.payload.iss  || 'missing' },
+        { label:'sub',  ok: !!jwt.payload.sub,  val: jwt.payload.sub  || 'missing' },
+        { label:'aud',  ok: !!jwt.payload.aud,  val: String(jwt.payload.aud  || 'missing') },
+        { label:'iat',  ok: !!iat,              val: iat ? fmtTime(iat) : 'missing' },
+        { label:'exp',  ok: !!exp && !isExpired, val: exp ? (isExpired ? '⚠ EXPIRED — ' : '') + fmtTime(exp) : 'missing — token never expires!' },
+        { label:'jti',  ok: !!jwt.payload.jti,  val: jwt.payload.jti  || 'missing (revocation impossible)' },
+      ];
+
+      out.innerHTML = `
+        <div class="token-viz">
+          <span class="part-h">${jwt.raw[0]}</span><span class="dot">.</span><span class="part-p">${jwt.raw[1]}</span><span class="dot">.</span><span class="part-s">${jwt.raw[2]}</span>
+        </div>
+        <div class="part-legend">
+          <span class="leg leg-h">■ Header</span>
+          <span class="leg leg-p">■ Payload</span>
+          <span class="leg leg-s">■ Signature</span>
+        </div>
+        <div class="decode-cols">
+          <div class="decode-col">
+            <div class="col-label c-h">Header</div>
+            <pre class="json-box">${syntaxColor(JSON.stringify(jwt.header, null, 2))}</pre>
+          </div>
+          <div class="decode-col">
+            <div class="col-label c-p">Payload</div>
+            <pre class="json-box">${syntaxColor(JSON.stringify(jwt.payload, null, 2))}</pre>
+          </div>
+        </div>
+        <div class="claims-section">
+          <div class="section-label">Claim Analysis</div>
+          ${checks.map(c => `
+            <div class="claim-row ${c.ok ? 'claim-ok' : 'claim-warn'}">
+              <span class="claim-icon">${c.ok ? '✓' : '!'}</span>
+              <span class="claim-key">${c.label}</span>
+              <span class="claim-val">${c.val}</span>
+            </div>`).join('')}
+        </div>
+        <div class="verify-section">
+          <div class="section-label">Verify Signature (HS256)</div>
+          <div class="verify-row">
+            <input id="verify-secret" type="text" class="field-input" placeholder="Signing secret…" value="${DEMO_SECRET}">
+            <button class="btn btn-secondary" onclick="runVerify()">Verify</button>
+          </div>
+          <div id="verify-result"></div>
+        </div>
+      `;
     }
 
-    if (code) {
-      console.log('I have the code');
-      exchangeToken(code);
-    } else {
-      console.log('I do not have the code yet');
+    async function runVerify() {
+      const token  = document.getElementById('decode-input').value.trim();
+      const secret = document.getElementById('verify-secret').value;
+      const el     = document.getElementById('verify-result');
+      el.innerHTML = '<span class="dim-msg">Checking…</span>';
+      const ok = await verifyHS256(token, secret);
+      el.innerHTML = ok
+        ? '<span class="ok-msg">✓ Signature valid — token is authentic and untampered.</span>'
+        : '<span class="err-msg">✗ Signature invalid — wrong secret or token was modified.</span>';
     }
-  </script>
 
-  <style>
+    /* ─── BUILD ──────────────────────────────────────────────────── */
+    async function runBuild() {
+      const iss     = document.getElementById('b-iss').value.trim()    || 'https://auth.example.com';
+      const sub     = document.getElementById('b-sub').value.trim()    || 'user_abc123';
+      const aud     = document.getElementById('b-aud').value.trim()    || 'https://api.example.com';
+      const expMins = parseInt(document.getElementById('b-exp').value) || 15;
+      const secret  = document.getElementById('b-secret').value        || DEMO_SECRET;
+
+      const header  = { alg:'HS256', typ:'JWT' };
+      const payload = { iss, sub, aud, iat: nowSec(), exp: nowSec() + expMins * 60 };
+      if (document.getElementById('b-jti').checked) payload.jti = genUUID();
+
+      document.querySelectorAll('.cc-row').forEach(row => {
+        const k = row.querySelector('.cc-key').value.trim();
+        const v = row.querySelector('.cc-val').value.trim();
+        if (k && v) { try { payload[k] = JSON.parse(v); } catch { payload[k] = v; } }
+      });
+
+      const token = await signHS256(header, payload, secret);
+      const parts = token.split('.');
+      const escaped = token.replace(/\\/g,'\\\\').replace(/`/g,'\\`');
+
+      document.getElementById('build-out').innerHTML = `
+        <div class="build-result">
+          <div class="section-label">Generated Token</div>
+          <div class="token-viz">
+            <span class="part-h">${parts[0]}</span><span class="dot">.</span><span class="part-p">${parts[1]}</span><span class="dot">.</span><span class="part-s">${parts[2]}</span>
+          </div>
+          <button class="btn btn-ghost btn-sm copy-btn" id="copy-btn" onclick="doCopy(\`${escaped}\`)">⎘ Copy token</button>
+          <div class="decode-cols" style="margin-top:20px">
+            <div class="decode-col">
+              <div class="col-label c-h">Header</div>
+              <pre class="json-box">${syntaxColor(JSON.stringify(header, null, 2))}</pre>
+            </div>
+            <div class="decode-col">
+              <div class="col-label c-p">Payload</div>
+              <pre class="json-box">${syntaxColor(JSON.stringify(payload, null, 2))}</pre>
+            </div>
+          </div>
+          <p class="server-note">⚠ In production, JWTs are signed server-side. Never expose your signing secret to the browser.</p>
+        </div>
+      `;
+    }
+
+    async function doCopy(text) {
+      await navigator.clipboard.writeText(text);
+      const btn = document.getElementById('copy-btn');
+      if (btn) { btn.textContent = '✓ Copied!'; setTimeout(() => btn.textContent = '⎘ Copy token', 1800); }
+    }
+
+    function addClaim() {
+      const row = document.createElement('div');
+      row.className = 'cc-row';
+      row.innerHTML = `<input type="text" class="field-input cc-key" placeholder="key" style="flex:1"><span style="color:var(--muted);padding:0 6px">:</span><input type="text" class="field-input cc-val" placeholder="value (JSON ok)" style="flex:2"><button class="btn-x" onclick="this.parentElement.remove()">✕</button>`;
+      document.getElementById('custom-claims').appendChild(row);
+    }
+
+    /* ─── TABS ───────────────────────────────────────────────────── */
+    function switchTab(name) {
+      document.querySelectorAll('.tab-panel').forEach(p => p.hidden = true);
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById(`panel-${name}`).hidden = false;
+      document.querySelector(`.tab-btn[data-tab="${name}"]`).classList.add('active');
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      initDemoToken();
+      document.getElementById('decode-input').addEventListener('input', function() {
+        if (this.value.trim().split('.').length === 3) runDecode();
+      });
+    });
+    </script>
+
+    <style>
     @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=JetBrains+Mono:wght@300;400;500&display=swap');
 
-    /* ─── TOKENS ─────────────────────────────────────────────── */
     :root {
-      --bg:         #020205;
-      --surface:    #080810;
-      --card:       rgba(255,255,255,0.028);
-      --border:     rgba(255,255,255,0.07);
-      --border-hi:  rgba(255,255,255,0.13);
-      --cyan:       #00e5cc;
-      --pink:       #ff1a75;
-      --gold:       #f5c518;
-      --white:      #f0eff6;
-      --dim:        #7a7a92;
-      --muted:      #404055;
-      --glow-c:     rgba(0,229,204,0.35);
-      --glow-p:     rgba(255,26,117,0.35);
+      --bg:        #020205;
+      --surface:   #080810;
+      --card:      rgba(255,255,255,0.028);
+      --border:    rgba(255,255,255,0.07);
+      --border-hi: rgba(255,255,255,0.13);
+      --cyan:      #00e5cc;
+      --pink:      #ff1a75;
+      --gold:      #f5c518;
+      --white:     #f0eff6;
+      --dim:       #7a7a92;
+      --muted:     #404055;
+      --glow-c:    rgba(0,229,204,0.35);
+      --glow-p:    rgba(255,26,117,0.35);
     }
 
-    /* ─── RESET ──────────────────────────────────────────────── */
-    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-    html { scroll-behavior: smooth; font-size: 16px; }
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+    html { scroll-behavior:smooth; font-size:16px; }
 
-    /* ─── BASE ───────────────────────────────────────────────── */
     body {
       background: var(--bg);
       color: var(--white);
@@ -159,632 +300,444 @@
       overflow-x: hidden;
     }
 
-    /* ─── GRAIN ──────────────────────────────────────────────── */
     body::after {
-      content: '';
-      position: fixed;
-      inset: 0;
+      content:'';
+      position:fixed; inset:0;
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.055'/%3E%3C/svg%3E");
-      opacity: 0.55;
-      pointer-events: none;
-      z-index: 9000;
+      opacity:0.55; pointer-events:none; z-index:9000;
     }
 
-    /* ─── AMBIENT BLOBS ──────────────────────────────────────── */
-    .amb {
-      position: fixed;
-      border-radius: 50%;
-      filter: blur(130px);
-      pointer-events: none;
-      z-index: 0;
-    }
-    .amb-1 {
-      width: 560px; height: 560px;
-      background: radial-gradient(circle, rgba(0,229,204,0.1), transparent 70%);
-      top: -260px; left: -160px;
-      animation: drift-a 22s ease-in-out infinite;
-    }
-    .amb-2 {
-      width: 460px; height: 460px;
-      background: radial-gradient(circle, rgba(255,26,117,0.08), transparent 70%);
-      bottom: -200px; right: -140px;
-      animation: drift-b 28s ease-in-out infinite;
-    }
-    .amb-3 {
-      width: 280px; height: 280px;
-      background: radial-gradient(circle, rgba(245,197,24,0.05), transparent 70%);
-      top: 45%; left: 55%;
-      animation: pulse-a 10s ease-in-out infinite;
-    }
+    .amb { position:fixed; border-radius:50%; filter:blur(130px); pointer-events:none; z-index:0; }
+    .amb-1 { width:560px; height:560px; background:radial-gradient(circle,rgba(0,229,204,0.1),transparent 70%); top:-260px; left:-160px; animation:drift-a 22s ease-in-out infinite; }
+    .amb-2 { width:460px; height:460px; background:radial-gradient(circle,rgba(255,26,117,0.08),transparent 70%); bottom:-200px; right:-140px; animation:drift-b 28s ease-in-out infinite; }
+    .amb-3 { width:280px; height:280px; background:radial-gradient(circle,rgba(245,197,24,0.05),transparent 70%); top:45%; left:55%; animation:pulse-a 10s ease-in-out infinite; }
 
-    @keyframes drift-a {
-      0%,100% { transform: translate(0,0); }
-      33%      { transform: translate(70px,50px); }
-      66%      { transform: translate(-40px,70px); }
-    }
-    @keyframes drift-b {
-      0%,100% { transform: translate(0,0); }
-      33%      { transform: translate(-60px,-40px); }
-      66%      { transform: translate(40px,-55px); }
-    }
-    @keyframes pulse-a {
-      0%,100% { opacity: 0.35; transform: scale(1); }
-      50%      { opacity: 0.8;  transform: scale(1.35); }
-    }
+    @keyframes drift-a { 0%,100%{transform:translate(0,0)} 33%{transform:translate(70px,50px)} 66%{transform:translate(-40px,70px)} }
+    @keyframes drift-b { 0%,100%{transform:translate(0,0)} 33%{transform:translate(-60px,-40px)} 66%{transform:translate(40px,-55px)} }
+    @keyframes pulse-a { 0%,100%{opacity:.35;transform:scale(1)} 50%{opacity:.8;transform:scale(1.35)} }
 
-    /* ─── LAYOUT ─────────────────────────────────────────────── */
     .page {
-      position: relative;
-      z-index: 1;
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 0 28px 80px;
+      position:relative; z-index:1;
+      max-width:860px; margin:0 auto;
+      padding:0 28px 80px;
     }
 
-    /* ─── TOPBAR ─────────────────────────────────────────────── */
-    .topbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 28px 0 0;
-    }
-    .topbar-logo {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.65rem;
-      letter-spacing: 0.3em;
-      color: var(--muted);
-      text-transform: uppercase;
-    }
-    .topbar-dot {
-      width: 7px; height: 7px;
-      border-radius: 50%;
-      background: var(--cyan);
-      box-shadow: 0 0 10px var(--glow-c);
-      animation: blink 2.4s ease-in-out infinite;
-    }
-    @keyframes blink {
-      0%,100% { opacity: 1; }
-      50%      { opacity: 0.15; }
-    }
+    /* ─── TOPBAR ─────────────────────────────────────────────────── */
+    .topbar { display:flex; align-items:center; justify-content:space-between; padding:28px 0 0; }
+    .topbar-logo { font-family:'JetBrains Mono',monospace; font-size:0.65rem; letter-spacing:0.3em; color:var(--muted); text-transform:uppercase; }
+    .topbar-dot { width:7px; height:7px; border-radius:50%; background:var(--cyan); box-shadow:0 0 10px var(--glow-c); animation:blink 2.4s ease-in-out infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.15} }
 
-    /* ─── LOGGEDIN BANNER ────────────────────────────────────── */
-    header { padding: 0; }
-    #loggedin {
-      display: none;
-      margin-top: 20px;
-      padding: 14px 20px;
-      background: rgba(0,229,204,0.06);
-      border: 1px solid rgba(0,229,204,0.2);
-      border-radius: 4px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem;
-      letter-spacing: 0.18em;
-      color: var(--cyan);
-      text-transform: uppercase;
-    }
+    /* ─── HERO ───────────────────────────────────────────────────── */
+    .hero { position:relative; padding:68px 0 44px; }
+    .hero-eye { font-family:'JetBrains Mono',monospace; font-size:0.65rem; letter-spacing:0.38em; color:var(--cyan); text-transform:uppercase; margin-bottom:18px; opacity:0; animation:up 0.7s ease forwards 0.15s; }
+    .hero-title { font-family:'Bebas Neue',sans-serif; font-size:clamp(72px,12vw,140px); line-height:0.88; letter-spacing:0.025em; margin-bottom:26px; opacity:0; animation:up 0.7s ease forwards 0.3s; }
+    .hero-title .t1 { display:block; color:var(--white); }
+    .hero-title .t2 { display:block; background:linear-gradient(100deg,var(--cyan) 0%,var(--pink) 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+    .hero-sub { font-size:1.1rem; color:var(--dim); font-style:italic; max-width:440px; opacity:0; animation:up 0.7s ease forwards 0.45s; }
 
-    /* ─── HERO ───────────────────────────────────────────────── */
-    .hero {
-      position: relative;
-      padding: 68px 0 44px;
-    }
-    .hero-eye {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.65rem;
-      letter-spacing: 0.38em;
-      color: var(--cyan);
-      text-transform: uppercase;
-      margin-bottom: 18px;
-      opacity: 0;
-      animation: up 0.7s ease forwards 0.15s;
-    }
-    .hero-title {
-      font-family: 'Bebas Neue', sans-serif;
-      font-size: clamp(76px, 13vw, 148px);
-      line-height: 0.88;
-      letter-spacing: 0.025em;
-      margin-bottom: 26px;
-      opacity: 0;
-      animation: up 0.7s ease forwards 0.3s;
-    }
-    .hero-title .t1 { display: block; color: var(--white); }
-    .hero-title .t2 {
-      display: block;
-      background: linear-gradient(100deg, var(--cyan) 0%, var(--pink) 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-    .hero-sub {
-      font-size: 1.1rem;
-      color: var(--dim);
-      font-style: italic;
-      max-width: 400px;
-      opacity: 0;
-      animation: up 0.7s ease forwards 0.45s;
-    }
+    /* JWT anatomy float */
+    .jwt-float { position:absolute; right:-10px; top:54px; display:flex; flex-direction:column; gap:6px; opacity:0; animation:up 1s ease forwards 0.9s; }
+    .jf-block { padding:8px 14px; border-radius:3px; font-family:'JetBrains Mono',monospace; font-size:0.6rem; letter-spacing:0.08em; border:1px solid; }
+    .jf-h { background:rgba(0,229,204,0.07); border-color:rgba(0,229,204,0.2); color:var(--cyan); }
+    .jf-p { background:rgba(245,197,24,0.07); border-color:rgba(245,197,24,0.2); color:var(--gold); }
+    .jf-s { background:rgba(255,26,117,0.07); border-color:rgba(255,26,117,0.2); color:var(--pink); }
+    .jf-label { display:block; font-size:0.52rem; letter-spacing:0.22em; text-transform:uppercase; opacity:0.6; margin-bottom:2px; }
+    .jf-code { opacity:0.9; }
+    @media (max-width:640px) { .jwt-float { display:none; } }
 
-    /* Vinyl record */
-    .vinyl {
-      position: absolute;
-      right: -10px;
-      top: 50px;
-      width: 168px;
-      height: 168px;
-      opacity: 0;
-      animation: fadein 1s ease forwards 0.9s, spin 9s linear infinite 1.9s;
-    }
-    .vinyl-disc {
-      width: 100%; height: 100%;
-      border-radius: 50%;
-      background:
-        radial-gradient(circle at 50% 50%,
-          #1c1c1c 0%, #1c1c1c 13%,
-          transparent 13.5%, transparent 17%,
-          #111 17%, #111 17.5%,
-          transparent 18%, transparent 31%,
-          #0f0f0f 31%, #0f0f0f 31.5%,
-          transparent 32%, transparent 46%,
-          #111 46%, #111 46.5%,
-          transparent 47%, transparent 62%,
-          #0f0f0f 62%, #0f0f0f 62.5%,
-          transparent 63%, transparent 78%,
-          #111 78%, #111 78.5%,
-          transparent 79%, #000 100%
-        ),
-        conic-gradient(from 0deg,
-          #151515, #0b0b0b 9deg, #151515 18deg, #0b0b0b 27deg,
-          #151515 36deg, #0b0b0b 45deg, #151515 54deg, #0b0b0b 63deg,
-          #151515 72deg, #0b0b0b 81deg, #151515 90deg, #0b0b0b 99deg,
-          #151515 108deg, #0b0b0b 117deg, #151515 126deg, #0b0b0b 135deg,
-          #151515 144deg, #0b0b0b 153deg, #151515 162deg, #0b0b0b 171deg,
-          #151515 180deg, #0b0b0b 189deg, #151515 198deg, #0b0b0b 207deg,
-          #151515 216deg, #0b0b0b 225deg, #151515 234deg, #0b0b0b 243deg,
-          #151515 252deg, #0b0b0b 261deg, #151515 270deg, #0b0b0b 279deg,
-          #151515 288deg, #0b0b0b 297deg, #151515 306deg, #0b0b0b 315deg,
-          #151515 324deg, #0b0b0b 333deg, #151515 342deg, #0b0b0b 351deg, #151515
-        );
-      border: 1px solid rgba(255,255,255,0.04);
-      box-shadow: 0 0 50px rgba(0,0,0,0.9), 0 0 20px rgba(0,0,0,0.6);
-      position: relative;
-    }
-    .vinyl-disc::after {
-      content: '';
-      position: absolute;
-      width: 28%; height: 28%;
-      border-radius: 50%;
-      background: conic-gradient(var(--cyan), var(--pink), var(--cyan));
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      box-shadow: 0 0 18px var(--glow-c), 0 0 6px var(--glow-p);
-    }
-    .vinyl-disc::before {
-      content: '';
-      position: absolute;
-      width: 9%; height: 9%;
-      border-radius: 50%;
-      background: #000;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      z-index: 1;
-    }
+    @keyframes up { from{opacity:0;transform:translateY(22px)} to{opacity:1;transform:translateY(0)} }
 
-    @keyframes spin    { to { transform: rotate(360deg); } }
-    @keyframes fadein  { to { opacity: 0.82; } }
-    @keyframes up {
-      from { opacity: 0; transform: translateY(22px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
+    /* ─── DIVIDER ────────────────────────────────────────────────── */
+    .divider { height:1px; background:linear-gradient(90deg,transparent,var(--border) 25%,var(--border) 75%,transparent); margin:0 0 44px; }
 
-    /* ─── DIVIDER ────────────────────────────────────────────── */
-    .divider {
-      height: 1px;
-      background: linear-gradient(90deg, transparent, var(--border) 25%, var(--border) 75%, transparent);
-      margin: 0 0 44px;
-    }
+    /* ─── TABS ───────────────────────────────────────────────────── */
+    .tab-nav { display:flex; gap:4px; border-bottom:1px solid var(--border); margin-bottom:32px; opacity:0; animation:up 0.6s ease forwards 0.6s; }
+    .tab-btn { background:none; border:none; border-bottom:2px solid transparent; font-family:'JetBrains Mono',monospace; font-size:0.72rem; letter-spacing:0.16em; text-transform:uppercase; color:var(--dim); padding:10px 22px 12px; cursor:pointer; transition:color 0.2s; margin-bottom:-1px; }
+    .tab-btn.active { color:var(--cyan); border-bottom-color:var(--cyan); }
+    .tab-btn:hover:not(.active) { color:var(--white); }
 
-    /* ─── ACTION ROW ─────────────────────────────────────────── */
-    .actions {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-bottom: 52px;
-      opacity: 0;
-      animation: up 0.7s ease forwards 0.6s;
-    }
+    /* ─── PANEL ──────────────────────────────────────────────────── */
+    .panel-desc { color:var(--dim); font-size:0.95rem; margin-bottom:20px; font-style:italic; }
 
+    /* ─── TOKEN TEXTAREA ─────────────────────────────────────────── */
+    .token-input {
+      width:100%; background:rgba(0,0,0,0.4); border:1px solid var(--border); border-radius:4px;
+      padding:14px 16px; font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--white);
+      resize:vertical; outline:none; transition:border-color 0.2s; line-height:1.6; word-break:break-all;
+    }
+    .token-input:focus { border-color:rgba(0,229,204,0.3); }
+
+    /* ─── TOKEN VISUALIZATION ────────────────────────────────────── */
+    .token-viz {
+      font-family:'JetBrains Mono',monospace; font-size:0.68rem; line-height:1.7;
+      padding:16px 20px; background:rgba(0,0,0,0.4); border:1px solid var(--border);
+      border-radius:4px; word-break:break-all; margin:16px 0;
+    }
+    .part-h { color:var(--cyan); }
+    .part-p { color:var(--gold); }
+    .part-s { color:var(--pink); }
+    .dot    { color:var(--muted); }
+
+    .part-legend { display:flex; gap:20px; margin-bottom:20px; }
+    .leg { font-family:'JetBrains Mono',monospace; font-size:0.62rem; letter-spacing:0.12em; }
+    .leg-h { color:var(--cyan); }
+    .leg-p { color:var(--gold); }
+    .leg-s { color:var(--pink); }
+
+    /* ─── TWO-COLUMN DECODE ──────────────────────────────────────── */
+    .decode-cols { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; }
+    @media (max-width:600px) { .decode-cols { grid-template-columns:1fr; } }
+    .decode-col { display:flex; flex-direction:column; gap:8px; }
+    .col-label { font-family:'JetBrains Mono',monospace; font-size:0.58rem; letter-spacing:0.22em; text-transform:uppercase; }
+    .c-h { color:var(--cyan); }
+    .c-p { color:var(--gold); }
+
+    /* ─── JSON BOX ───────────────────────────────────────────────── */
+    .json-box {
+      background:rgba(0,0,0,0.35); border:1px solid var(--border); border-radius:3px;
+      padding:14px 16px; font-family:'JetBrains Mono',monospace; font-size:0.7rem;
+      line-height:1.75; overflow-x:auto; white-space:pre; flex:1;
+    }
+    .jk { color:var(--cyan); }
+    .js { color:var(--gold); }
+    .jb { color:var(--pink); }
+    .ji { color:#b48eff; }
+    .jn { color:var(--dim); }
+
+    /* ─── CLAIM ANALYSIS ─────────────────────────────────────────── */
+    .claims-section, .verify-section { margin-bottom:24px; }
+    .section-label { font-family:'JetBrains Mono',monospace; font-size:0.58rem; letter-spacing:0.28em; text-transform:uppercase; color:var(--muted); margin-bottom:10px; }
+    .claim-row { display:flex; align-items:flex-start; gap:12px; padding:8px 14px; border-radius:3px; margin-bottom:4px; }
+    .claim-ok   { background:rgba(0,229,204,0.04); border:1px solid rgba(0,229,204,0.12); }
+    .claim-warn { background:rgba(255,26,117,0.05); border:1px solid rgba(255,26,117,0.15); }
+    .claim-icon { font-size:0.78rem; min-width:16px; }
+    .claim-ok .claim-icon   { color:var(--cyan); }
+    .claim-warn .claim-icon { color:var(--pink); }
+    .claim-key { font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--white); min-width:44px; flex-shrink:0; }
+    .claim-val { font-family:'JetBrains Mono',monospace; font-size:0.66rem; color:var(--dim); word-break:break-all; }
+
+    /* ─── VERIFY ─────────────────────────────────────────────────── */
+    .verify-row { display:flex; gap:10px; margin-bottom:10px; }
+    .verify-row .field-input { flex:1; }
+    .ok-msg  { font-family:'JetBrains Mono',monospace; font-size:0.72rem; color:var(--cyan); }
+    .err-msg { font-family:'JetBrains Mono',monospace; font-size:0.72rem; color:var(--pink); }
+    .dim-msg { font-family:'JetBrains Mono',monospace; font-size:0.72rem; color:var(--dim); }
+
+    /* ─── FORM ───────────────────────────────────────────────────── */
+    .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+    @media (max-width:600px) { .form-grid { grid-template-columns:1fr; } }
+    .form-group { display:flex; flex-direction:column; gap:6px; }
+    .form-group-full { grid-column:1/-1; }
+    .field-label { font-family:'JetBrains Mono',monospace; font-size:0.6rem; letter-spacing:0.16em; text-transform:uppercase; color:var(--dim); display:flex; align-items:center; gap:8px; }
+    .claim-tag { background:rgba(0,229,204,0.1); color:var(--cyan); border:1px solid rgba(0,229,204,0.2); border-radius:2px; padding:1px 6px; font-size:0.55rem; }
+    .warn-tag  { background:rgba(255,26,117,0.1); color:var(--pink); border:1px solid rgba(255,26,117,0.2); border-radius:2px; padding:1px 6px; font-size:0.55rem; }
+    .field-input {
+      background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:3px;
+      padding:10px 14px; font-family:'JetBrains Mono',monospace; font-size:0.74rem;
+      color:var(--white); outline:none; transition:border-color 0.2s; width:100%;
+    }
+    .field-input:focus { border-color:rgba(0,229,204,0.35); }
+    select.field-input { cursor:pointer; }
+
+    .toggle-row { display:flex; gap:24px; margin-bottom:20px; flex-wrap:wrap; }
+    .toggle-label { font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--dim); display:flex; align-items:center; gap:8px; cursor:pointer; }
+    .toggle-label input { accent-color:var(--cyan); }
+    .toggle-label code { color:var(--cyan); background:rgba(0,229,204,0.08); padding:1px 6px; border-radius:2px; }
+
+    .cc-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+    .btn-x { background:none; border:none; color:var(--muted); cursor:pointer; font-size:0.75rem; padding:4px 8px; }
+    .btn-x:hover { color:var(--pink); }
+
+    .server-note { font-family:'JetBrains Mono',monospace; font-size:0.66rem; color:var(--pink); margin-top:16px; padding:10px 14px; background:rgba(255,26,117,0.05); border:1px solid rgba(255,26,117,0.15); border-radius:3px; }
+
+    /* ─── BUTTONS ────────────────────────────────────────────────── */
     .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 9px;
-      padding: 13px 30px;
-      border: none;
-      border-radius: 3px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.72rem;
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-      cursor: pointer;
-      position: relative;
-      overflow: hidden;
-      transition: transform 0.18s ease, box-shadow 0.25s ease;
+      display:inline-flex; align-items:center; gap:8px; padding:12px 28px;
+      border:none; border-radius:3px; font-family:'JetBrains Mono',monospace;
+      font-size:0.72rem; letter-spacing:0.16em; text-transform:uppercase;
+      cursor:pointer; position:relative; overflow:hidden;
+      transition:transform 0.18s ease, box-shadow 0.25s ease;
     }
-    .btn::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: rgba(255,255,255,0.07);
-      opacity: 0;
-      transition: opacity 0.18s;
-    }
-    .btn:hover::after { opacity: 1; }
-    .btn:active { transform: scale(0.97); }
+    .btn::after { content:''; position:absolute; inset:0; background:rgba(255,255,255,0.07); opacity:0; transition:opacity 0.18s; }
+    .btn:hover::after { opacity:1; }
+    .btn:active { transform:scale(0.97); }
+    .btn-primary { background:var(--cyan); color:#000; font-weight:500; }
+    .btn-primary:hover { transform:translateY(-2px); box-shadow:0 0 26px var(--glow-c); }
+    .btn-secondary { background:transparent; color:var(--white); border:1px solid var(--border); }
+    .btn-secondary:hover { border-color:var(--pink); transform:translateY(-2px); box-shadow:0 0 20px var(--glow-p); }
+    .btn-ghost { background:transparent; color:var(--dim); border:1px solid var(--muted); font-size:0.68rem; }
+    .btn-ghost:hover { color:var(--white); border-color:var(--border-hi); transform:translateY(-2px); }
+    .btn-sm { padding:8px 18px; font-size:0.66rem; }
 
-    .btn-primary {
-      background: var(--cyan);
-      color: #000;
-      font-weight: 500;
-    }
-    .btn-primary:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 0 28px var(--glow-c), 0 0 60px rgba(0,229,204,0.15);
-    }
+    .copy-btn { margin-top:4px; }
+    .build-result { margin-top:32px; }
 
-    .btn-secondary {
-      background: transparent;
-      color: var(--white);
-      border: 1px solid var(--border);
-    }
-    .btn-secondary:hover {
-      border-color: var(--pink);
-      transform: translateY(-3px);
-      box-shadow: 0 0 22px var(--glow-p);
-    }
+    /* ─── PRACTICES ──────────────────────────────────────────────── */
+    .practices-section { margin-top:60px; }
+    .practices-title { font-family:'Bebas Neue',sans-serif; font-size:clamp(36px,6vw,58px); letter-spacing:0.04em; margin-bottom:8px; background:linear-gradient(90deg,var(--white),var(--dim) 80%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+    .practices-sub { color:var(--dim); font-style:italic; margin-bottom:32px; }
 
-    .btn-ghost {
-      background: transparent;
-      color: var(--dim);
-      border: 1px solid var(--muted);
-      font-size: 0.68rem;
-    }
-    .btn-ghost:hover {
-      color: var(--white);
-      border-color: var(--border-hi);
-      transform: translateY(-2px);
-    }
+    .practices-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
+    @media (max-width:600px) { .practices-grid { grid-template-columns:1fr; } }
 
-    /* ─── OUTPUT ─────────────────────────────────────────────── */
-    #output { margin-bottom: 52px; }
+    .practice-card {
+      background:var(--card); border:1px solid var(--border); border-radius:4px;
+      padding:22px 24px 22px 28px; position:relative; overflow:hidden;
+      transition:border-color 0.25s, background 0.25s;
+    }
+    .practice-card:hover { background:rgba(255,255,255,0.034); border-color:var(--border-hi); }
+    .practice-card::before { content:''; position:absolute; top:0; left:0; width:3px; height:100%; }
+    .practice-card.do::before   { background:linear-gradient(180deg,var(--cyan),rgba(0,229,204,0.2)); }
+    .practice-card.dont::before { background:linear-gradient(180deg,var(--pink),rgba(255,26,117,0.2)); }
 
-    .loading-msg, .no-token-msg {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.78rem;
-      color: var(--dim);
-      letter-spacing: 0.12em;
-      padding: 20px 0;
-    }
-    .no-token-msg { color: var(--pink); }
+    .p-badge { display:inline-block; font-family:'JetBrains Mono',monospace; font-size:0.54rem; letter-spacing:0.2em; text-transform:uppercase; padding:2px 8px; border-radius:2px; margin-bottom:10px; }
+    .p-badge.do   { background:rgba(0,229,204,0.1);  color:var(--cyan); border:1px solid rgba(0,229,204,0.22); }
+    .p-badge.dont { background:rgba(255,26,117,0.1); color:var(--pink); border:1px solid rgba(255,26,117,0.22); }
 
-    #output .tracks-heading {
-      font-family: 'Bebas Neue', sans-serif;
-      font-size: 2.2rem;
-      letter-spacing: 0.08em;
-      margin-bottom: 20px;
-      background: linear-gradient(90deg, var(--cyan), var(--white) 55%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
+    .practice-card h3 { font-family:'JetBrains Mono',monospace; font-size:0.78rem; color:var(--white); letter-spacing:0.04em; margin-bottom:8px; }
+    .practice-card p  { font-size:0.92rem; color:var(--dim); line-height:1.65; margin-bottom:12px; }
+    .p-code {
+      font-family:'JetBrains Mono',monospace; font-size:0.66rem; padding:8px 12px;
+      background:rgba(0,0,0,0.4); border:1px solid var(--border); border-radius:3px;
+      overflow-x:auto; white-space:pre; display:block;
     }
+    .practice-card.do   .p-code { color:var(--cyan); }
+    .practice-card.dont .p-code { color:var(--pink); }
 
-    #output .list-group {
-      list-style: none;
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      margin-bottom: 10px;
-      overflow: hidden;
-      opacity: 0;
-      animation: up 0.4s ease forwards;
-      transition: border-color 0.2s;
-    }
-    #output .list-group:hover { border-color: rgba(0,229,204,0.22); }
+    /* ─── FOOTER ─────────────────────────────────────────────────── */
+    .site-footer { margin-top:72px; padding:32px 0 0; border-top:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:20px; }
+    .footer-label { font-family:'JetBrains Mono',monospace; font-size:0.62rem; color:var(--muted); letter-spacing:0.24em; text-transform:uppercase; }
 
-    #output .list-group-item {
-      display: flex;
-      align-items: baseline;
-      gap: 14px;
-      padding: 9px 20px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.76rem;
-      color: var(--dim);
-      border-bottom: 1px solid var(--border);
-    }
-    #output .list-group-item:last-child { border-bottom: none; }
+    .waveform { display:flex; align-items:center; gap:3px; height:22px; }
+    .w-bar { width:3px; background:var(--cyan); border-radius:2px; opacity:0.55; animation:wave 1.4s ease-in-out infinite; }
+    .w-bar:nth-child(1){height:6px;animation-delay:.00s}
+    .w-bar:nth-child(2){height:14px;animation-delay:.10s}
+    .w-bar:nth-child(3){height:22px;animation-delay:.20s}
+    .w-bar:nth-child(4){height:10px;animation-delay:.30s}
+    .w-bar:nth-child(5){height:18px;animation-delay:.40s}
+    .w-bar:nth-child(6){height:8px;animation-delay:.50s}
+    .w-bar:nth-child(7){height:14px;animation-delay:.13s}
+    .w-bar:nth-child(8){height:6px;animation-delay:.23s}
+    @keyframes wave { 0%,100%{transform:scaleY(.45)} 50%{transform:scaleY(1)} }
 
-    #output .item-label {
-      font-size: 0.62rem;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--muted);
-      min-width: 70px;
-      flex-shrink: 0;
-    }
-    #output .track-name {
-      color: var(--white);
-      font-size: 0.82rem;
-    }
-
-    /* ─── INFO CARD ──────────────────────────────────────────── */
-    .info-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 30px 32px;
-      margin-bottom: 52px;
-      position: relative;
-      overflow: hidden;
-      opacity: 0;
-      animation: up 0.7s ease forwards 0.75s;
-    }
-    .info-card::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0;
-      width: 3px; height: 100%;
-      background: linear-gradient(180deg, var(--cyan), var(--pink));
-    }
-
-    #intro {
-      font-size: 1.05rem;
-      color: var(--dim);
-      line-height: 1.85;
-    }
-    #intro b {
-      color: var(--cyan);
-      font-weight: 400;
-      font-style: normal;
-    }
-
-    /* ─── STEPS ──────────────────────────────────────────────── */
-    .steps-header {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.62rem;
-      letter-spacing: 0.38em;
-      color: var(--muted);
-      text-transform: uppercase;
-      margin-bottom: 18px;
-      opacity: 0;
-      animation: up 0.7s ease forwards 0.85s;
-    }
-
-    .step-wrap {
-      opacity: 0;
-      animation: up 0.6s ease forwards;
-    }
-    .step-wrap:nth-child(1) { animation-delay: 0.9s; }
-    .step-wrap:nth-child(2) { animation-delay: 1.0s; }
-    .step-wrap:nth-child(3) { animation-delay: 1.1s; }
-
-    .step-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 26px 28px 26px 72px;
-      margin-bottom: 10px;
-      position: relative;
-      transition: border-color 0.25s, background 0.25s;
-    }
-    .step-card:hover {
-      background: rgba(255,255,255,0.034);
-      border-color: var(--border-hi);
-    }
-
-    .step-num {
-      position: absolute;
-      left: 22px; top: 22px;
-      font-family: 'Bebas Neue', sans-serif;
-      font-size: 2.6rem;
-      line-height: 1;
-      background: linear-gradient(160deg, var(--cyan), var(--pink));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      opacity: 0.55;
-    }
-
-    #step1, #step2, #step3 {
-      font-size: 1rem;
-      color: var(--dim);
-      line-height: 1.9;
-    }
-    #step1 b, #step2 b, #step3 b {
-      color: var(--white);
-      font-weight: 600;
-    }
-
-    pre#code-verifier {
-      margin-top: 14px;
-      padding: 12px 16px;
-      background: rgba(0,0,0,0.45);
-      border: 1px solid var(--border);
-      border-radius: 3px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.7rem;
-      color: var(--cyan);
-      overflow-x: auto;
-      letter-spacing: 0.04em;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-
-    /* ─── FOOTER ─────────────────────────────────────────────── */
-    .site-footer {
-      margin-top: 72px;
-      padding: 32px 0 0;
-      border-top: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 20px;
-    }
-    .footer-label {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.62rem;
-      color: var(--muted);
-      letter-spacing: 0.24em;
-      text-transform: uppercase;
-    }
-
-    .waveform {
-      display: flex;
-      align-items: center;
-      gap: 3px;
-      height: 22px;
-    }
-    .w-bar {
-      width: 3px;
-      background: var(--cyan);
-      border-radius: 2px;
-      opacity: 0.55;
-      animation: wave 1.4s ease-in-out infinite;
-    }
-    .w-bar:nth-child(1) { height:  6px; animation-delay: 0.00s; }
-    .w-bar:nth-child(2) { height: 14px; animation-delay: 0.10s; }
-    .w-bar:nth-child(3) { height: 22px; animation-delay: 0.20s; }
-    .w-bar:nth-child(4) { height: 10px; animation-delay: 0.30s; }
-    .w-bar:nth-child(5) { height: 18px; animation-delay: 0.40s; }
-    .w-bar:nth-child(6) { height:  8px; animation-delay: 0.50s; }
-    .w-bar:nth-child(7) { height: 14px; animation-delay: 0.13s; }
-    .w-bar:nth-child(8) { height:  6px; animation-delay: 0.23s; }
-    @keyframes wave {
-      0%,100% { transform: scaleY(0.45); }
-      50%      { transform: scaleY(1); }
-    }
-
-    /* ─── SCROLLBAR ──────────────────────────────────────────── */
-    ::-webkit-scrollbar { width: 5px; }
-    ::-webkit-scrollbar-track { background: var(--surface); }
-    ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: var(--dim); }
-
-    /* ─── SELECTION ──────────────────────────────────────────── */
-    ::selection { background: rgba(0,229,204,0.25); color: var(--white); }
-  </style>
+    ::-webkit-scrollbar{width:5px}
+    ::-webkit-scrollbar-track{background:var(--surface)}
+    ::-webkit-scrollbar-thumb{background:var(--muted);border-radius:3px}
+    ::-webkit-scrollbar-thumb:hover{background:var(--dim)}
+    ::selection{background:rgba(0,229,204,0.25);color:var(--white)}
+    </style>
 </head>
 <body>
 
-  <!-- Ambient background -->
   <div class="amb amb-1"></div>
   <div class="amb amb-2"></div>
   <div class="amb amb-3"></div>
 
   <div class="page">
 
-    <!-- Top bar -->
     <div class="topbar">
-      <span class="topbar-logo">Napster · OAuth</span>
+      <span class="topbar-logo">JWT · Best Practices</span>
       <div class="topbar-dot"></div>
     </div>
 
-    <!-- Header / logged-in state -->
-    <header>
-      <div id="loggedin" style="display:none;">● Connected</div>
-    </header>
-
-    <!-- Hero -->
     <section class="hero">
-      <div class="vinyl"><div class="vinyl-disc"></div></div>
-      <p class="hero-eye">OAuth 2.0 · PKCE · Napster API</p>
+      <div class="jwt-float">
+        <div class="jf-block jf-h"><span class="jf-label">header</span><span class="jf-code">eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9</span></div>
+        <div class="jf-block jf-p"><span class="jf-label">payload</span><span class="jf-code">eyJzdWIiOiJ1c2VyX2ExYjJjM2Q0IiwiaXNzIjoi…</span></div>
+        <div class="jf-block jf-s"><span class="jf-label">signature</span><span class="jf-code">SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQss…</span></div>
+      </div>
+      <p class="hero-eye">RFC 7519 · HS256 · RS256 · ES256</p>
       <h1 class="hero-title">
-        <span class="t1">Connect</span>
-        <span class="t2">Napster</span>
+        <span class="t1">JSON Web</span>
+        <span class="t2">Tokens</span>
       </h1>
-      <p class="hero-sub">Authenticate with your Napster account to stream your favorites.</p>
+      <p class="hero-sub">Decode, build, and verify JWTs — with an interactive best-practices guide.</p>
     </section>
 
     <div class="divider"></div>
 
-    <!-- Login panel -->
-    <div id="login" style="display:unset;">
+    <nav class="tab-nav">
+      <button class="tab-btn active" data-tab="decode" onclick="switchTab('decode')">Decode</button>
+      <button class="tab-btn"        data-tab="build"  onclick="switchTab('build')">Build</button>
+    </nav>
 
-      <!-- Buttons -->
-      <div class="actions">
-        <button id="login-button" class="btn btn-primary">↗ Login</button>
-        <button id="getCurrent" class="btn btn-secondary">♫ Get Songs</button>
-        <button id="logout-button" class="btn btn-ghost">← Logout</button>
-      </div>
+    <!-- ── DECODE PANEL ──────────────────────────────────────────── -->
+    <div id="panel-decode">
+      <p class="panel-desc">Paste any JWT below — the demo token was generated with best-practice claims and the secret shown in the verify field.</p>
+      <textarea id="decode-input" class="token-input" rows="4" spellcheck="false" placeholder="Paste a JWT here…"></textarea>
+      <br><button class="btn btn-primary btn-sm" onclick="runDecode()" style="margin-top:10px">↳ Decode</button>
+      <div id="decode-out" style="margin-top:28px"></div>
+    </div>
 
-      <script>
-        document.getElementById('getCurrent').addEventListener('click', () => {getSong()}, false);
-        document.getElementById('login-button').addEventListener('click', () => {redirectToAuthorizeEndpoint()}, false);
-        document.getElementById('logout-button').addEventListener('click', () => {logout()}, false);
-      </script>
-
-      <!-- Track output -->
-      <div id="output"></div>
-
-      <!-- Intro card -->
-      <div class="info-card">
-        <div id="intro">
-          This is a demonstration of using OAuth to authenticate with Napster.<br>
-          This login flow uses <b>PKCE (Proof Key for Code Exchange)</b>,<br>
-          so the website doesn't have to expose the client secret in the source code.
+    <!-- ── BUILD PANEL ───────────────────────────────────────────── -->
+    <div id="panel-build" hidden>
+      <p class="panel-desc">Fill in claims and a secret to build a signed HS256 JWT. Signing runs in the browser via the Web Crypto API — for demonstration only.</p>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="field-label">Issuer <span class="claim-tag">iss</span></label>
+          <input id="b-iss" type="text" class="field-input" value="https://auth.example.com">
+        </div>
+        <div class="form-group">
+          <label class="field-label">Subject <span class="claim-tag">sub</span></label>
+          <input id="b-sub" type="text" class="field-input" value="user_abc123">
+        </div>
+        <div class="form-group">
+          <label class="field-label">Audience <span class="claim-tag">aud</span></label>
+          <input id="b-aud" type="text" class="field-input" value="https://api.example.com">
+        </div>
+        <div class="form-group">
+          <label class="field-label">Expires In <span class="claim-tag">exp</span></label>
+          <select id="b-exp" class="field-input">
+            <option value="5">5 minutes</option>
+            <option value="15" selected>15 minutes — recommended</option>
+            <option value="60">1 hour</option>
+            <option value="1440">24 hours</option>
+          </select>
+        </div>
+        <div class="form-group form-group-full">
+          <label class="field-label">Signing Secret <span class="warn-tag">server-side only in production</span></label>
+          <input id="b-secret" type="text" class="field-input" value="super-secret-demo-key-32-chars!!">
         </div>
       </div>
 
-      <!-- Steps -->
-      <p class="steps-header">How it works</p>
-
-      <div class="step-wrap">
-        <div class="step-card">
-          <span class="step-num">1</span>
-          <div id="step1">
-            First, the website generates a random alphanumeric string of
-            length&nbsp;64 — the <b>Code Verifier</b>.
-            <pre id="code-verifier"></pre>
-          </div>
-        </div>
+      <div class="toggle-row">
+        <label class="toggle-label"><input type="checkbox" id="b-jti" checked> Include <code>jti</code> (UUID — enables revocation)</label>
       </div>
 
-      <div class="step-wrap">
-        <div class="step-card">
-          <span class="step-num">2</span>
-          <div id="step2">
-            You will then be redirected to the login page, where you confirm
-            the requested permissions. The URL contains a <b>hash of the Code Verifier</b>
-            — the <b>Code Challenge</b>.<br><br>
-            Only this website knows the actual Code Verifier. This will be useful later on.
-          </div>
-        </div>
+      <div style="margin-bottom:20px">
+        <div class="section-label">Custom Claims</div>
+        <div id="custom-claims"></div>
+        <button class="btn btn-ghost btn-sm" onclick="addClaim()" style="margin-top:8px">+ Add claim</button>
       </div>
 
-      <div class="step-wrap">
-        <div class="step-card">
-          <span class="step-num">3</span>
-          <div id="step3">
-            After granting permission, you are redirected back here with an
-            <b>auth code</b>. The website exchanges this for an <b>access token</b>
-            that allows it to read your Napster data — and proves its identity to the API
-            by supplying the unhashed Code Verifier.
-          </div>
+      <button class="btn btn-primary" onclick="runBuild()">⬡ Build &amp; Sign JWT</button>
+      <div id="build-out"></div>
+    </div>
+
+    <!-- ── BEST PRACTICES ────────────────────────────────────────── -->
+    <section class="practices-section">
+      <div class="divider"></div>
+      <h2 class="practices-title">Best Practices</h2>
+      <p class="practices-sub">Essential rules for using JWTs securely in production systems.</p>
+
+      <div class="practices-grid">
+
+        <div class="practice-card do">
+          <span class="p-badge do">Do</span>
+          <h3>Use short-lived access tokens</h3>
+          <p>Access tokens should expire in 15 minutes. If stolen, they're only valid for a short window. Use refresh tokens for session persistence.</p>
+          <code class="p-code">exp: Math.floor(Date.now()/1000) + 900 // 15 min</code>
         </div>
+
+        <div class="practice-card dont">
+          <span class="p-badge dont">Don't</span>
+          <h3>Store tokens in localStorage</h3>
+          <p>localStorage is readable by any JavaScript on the page. A single XSS vulnerability lets an attacker steal every token silently.</p>
+          <code class="p-code">// WRONG — XSS steals this immediately
+localStorage.setItem('token', jwt)</code>
+        </div>
+
+        <div class="practice-card do">
+          <span class="p-badge do">Do</span>
+          <h3>Use HttpOnly cookies for storage</h3>
+          <p>HttpOnly cookies are inaccessible to JavaScript. Combine with Secure and SameSite=Strict for maximum protection.</p>
+          <code class="p-code">Set-Cookie: token=&lt;jwt&gt;;
+  HttpOnly; Secure; SameSite=Strict;
+  Path=/; Max-Age=900</code>
+        </div>
+
+        <div class="practice-card dont">
+          <span class="p-badge dont">Don't</span>
+          <h3>Accept the "none" algorithm</h3>
+          <p>Setting <code style="color:var(--pink)">alg: "none"</code> disables signature verification entirely. An attacker can forge any payload and the server will accept it.</p>
+          <code class="p-code">// VULNERABLE — forged token accepted
+{ "alg": "none", "typ": "JWT" }</code>
+        </div>
+
+        <div class="practice-card do">
+          <span class="p-badge do">Do</span>
+          <h3>Include all standard claims</h3>
+          <p>Always set <code style="color:var(--cyan)">iss</code>, <code style="color:var(--cyan)">sub</code>, <code style="color:var(--cyan)">aud</code>, <code style="color:var(--cyan)">exp</code>, <code style="color:var(--cyan)">iat</code>, and <code style="color:var(--cyan)">jti</code> on every token you issue.</p>
+          <code class="p-code">{ iss, sub, aud, exp, iat, jti }</code>
+        </div>
+
+        <div class="practice-card dont">
+          <span class="p-badge dont">Don't</span>
+          <h3>Put sensitive data in the payload</h3>
+          <p>The payload is base64url-encoded, not encrypted. Anyone who holds the token can decode and read it without a key.</p>
+          <code class="p-code">// WRONG — anyone can decode this
+{ "password": "hunter2",
+  "ssn": "123-45-6789" }</code>
+        </div>
+
+        <div class="practice-card do">
+          <span class="p-badge do">Do</span>
+          <h3>Explicitly specify the algorithm</h3>
+          <p>Hardcode the expected algorithm in your verification logic. Never trust the <code style="color:var(--cyan)">alg</code> header value from the token itself.</p>
+          <code class="p-code">// Node.js / jsonwebtoken
+jwt.verify(token, secret, {
+  algorithms: ['HS256']  // explicit
+})</code>
+        </div>
+
+        <div class="practice-card dont">
+          <span class="p-badge dont">Don't</span>
+          <h3>Omit expiration</h3>
+          <p>A token without <code style="color:var(--pink)">exp</code> is valid forever. If leaked — via logs, caches, or breaches — it can never be invalidated without rotating the signing key.</p>
+          <code class="p-code">// WRONG — this token never expires
+{ "sub": "user_123", "role": "admin" }</code>
+        </div>
+
+        <div class="practice-card do">
+          <span class="p-badge do">Do</span>
+          <h3>Use jti for revocation</h3>
+          <p>Store issued <code style="color:var(--cyan)">jti</code> values in Redis or a fast cache. Check on every request to enable immediate token revocation (logout, key rotation).</p>
+          <code class="p-code">// On each request
+if (await redis.sismember('revoked', jti))
+  throw new Error('Token revoked')</code>
+        </div>
+
+        <div class="practice-card do">
+          <span class="p-badge do">Do</span>
+          <h3>Rotate refresh tokens</h3>
+          <p>Issue a new refresh token each time it is used and invalidate the old one. This detects token theft: a reused refresh token signals a compromise.</p>
+          <code class="p-code">// On refresh
+await revokeToken(old_refresh_jti)
+return issueTokenPair(userId)</code>
+        </div>
+
+        <div class="practice-card do">
+          <span class="p-badge do">Do</span>
+          <h3>Use RS256 or ES256 for distributed systems</h3>
+          <p>Asymmetric algorithms let multiple services verify tokens using the public key without ever touching the private signing key.</p>
+          <code class="p-code">// Sign with private key (auth server only)
+// Verify with public key (any service)
+{ "alg": "RS256" }  // or ES256</code>
+        </div>
+
+        <div class="practice-card dont">
+          <span class="p-badge dont">Don't</span>
+          <h3>Trust the alg header blindly</h3>
+          <p>Algorithm confusion attacks switch the algorithm to trick the server. An RS256 public key treated as an HS256 secret lets attackers sign their own tokens.</p>
+          <code class="p-code">// VULNERABLE — attacker changes alg to HS256
+// and signs with your public key as the secret
+{ "alg": "HS256", "typ": "JWT" }</code>
+        </div>
+
       </div>
+    </section>
 
-      <!-- Footer -->
-      <footer class="site-footer">
-        <span class="footer-label">PKCE Demo · site6.brianhenning.xyz</span>
-        <div class="waveform">
-          <div class="w-bar"></div><div class="w-bar"></div><div class="w-bar"></div>
-          <div class="w-bar"></div><div class="w-bar"></div><div class="w-bar"></div>
-          <div class="w-bar"></div><div class="w-bar"></div>
-        </div>
-      </footer>
+    <footer class="site-footer">
+      <span class="footer-label">JWT Best Practices Demo</span>
+      <div class="waveform">
+        <div class="w-bar"></div><div class="w-bar"></div><div class="w-bar"></div>
+        <div class="w-bar"></div><div class="w-bar"></div><div class="w-bar"></div>
+        <div class="w-bar"></div><div class="w-bar"></div>
+      </div>
+    </footer>
 
-    </div><!-- /#login -->
-
-    <div id="content"></div>
-
-  </div><!-- /.page -->
+  </div>
 
 </body>
 </html>
